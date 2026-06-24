@@ -1,6 +1,6 @@
 ﻿const storeKey = "gestao-projetos-v1";
 const sessionKey = "gestao-projetos-session";
-const supabaseUrl = "https://mhqssjnttonsqcfjarf.supabase.co";
+const supabaseUrl = "https://mhqssjntntonsqcfjarf.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ocXNzam50bnRvbnNxY2ZqYXJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDg5NzgsImV4cCI6MjA5Nzg4NDk3OH0.cr4mKTNhCCFjasvodaJQfocrk_kAzye5QFca5A9ihiw";
 const supabaseClient = window.supabase?.createClient(supabaseUrl, supabaseKey);
 let remoteStateReady = false;
