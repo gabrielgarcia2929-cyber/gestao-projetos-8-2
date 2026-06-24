@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gestão de Projetos</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -12,8 +13,8 @@
         <img src="assets/logo-8-2.png" alt="8.2 The Experts in Renewable Energy" />
         <h1>Gestão de Projetos</h1>
         <p>Acesse sua área de trabalho.</p>
-        <label>Usuário
-          <select id="loginUser" required></select>
+        <label>E-mail
+          <input id="loginUser" type="email" required autocomplete="username" placeholder="seu.email@empresa.com" />
         </label>
         <label>Senha
           <input id="loginPassword" type="password" required autocomplete="current-password" />

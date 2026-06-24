@@ -1,5 +1,10 @@
 ﻿const storeKey = "gestao-projetos-v1";
 const sessionKey = "gestao-projetos-session";
+const supabaseUrl = "https://mhqssjnttonsqcfjarf.supabase.co";
+const supabaseKey = "sb_publishable_yblqOGABPOXBjy8YxHg3tw_r34mlD1j";
+const supabaseClient = window.supabase?.createClient(supabaseUrl, supabaseKey);
+let remoteStateReady = false;
+let remoteSaveTimer = null;
 const appUsers = [
   { username: "Anna", password: "Anna-8p2-7429", role: "member" },
   { username: "Felipe", password: "Felipe-8p2-3168", role: "member" },
@@ -184,8 +189,21 @@ function isCoordinator() {
   return currentUser?.role === "coordinator";
 }
 
-function requireLogin() {
-  els.loginUser.innerHTML = appUsers.map((user) => `<option value="${escapeHtml(user.username)}">${escapeHtml(user.username)}</option>`).join("");
+async function requireLogin() {
+  if (!supabaseClient) {
+    document.body.classList.add("auth-locked");
+    els.loginScreen.classList.remove("hidden-field");
+    els.loginError.textContent = "Supabase não carregou. Verifique a conexão com a internet.";
+    return;
+  }
+  const { data } = await supabaseClient.auth.getSession();
+  if (data.session?.user) {
+    currentUser = mapSupabaseUser(data.session.user);
+    await loadRemoteState();
+  } else {
+    currentUser = null;
+    localStorage.removeItem(sessionKey);
+  }
   if (currentUser) {
     showAuthenticatedApp();
     return;
@@ -201,6 +219,28 @@ function showAuthenticatedApp() {
   els.currentUserLabel.textContent = currentUser.username;
   applyUserPermissions();
   render();
+}
+
+function mapSupabaseUser(user) {
+  const email = user.email || "";
+  const localPart = email.split("@")[0] || "";
+  const normalized = normalizeText(localPart);
+  const knownNames = {
+    anna: "Anna",
+    felipe: "Felipe",
+    gustavo: "Gustavo",
+    vanderlania: "Vanderlania",
+    gabriel: "Gabriel",
+    coordenacao: "Coordenação",
+    coord: "Coordenação",
+  };
+  const username = knownNames[normalized] || user.user_metadata?.name || localPart || email || "Usuário";
+  return {
+    id: user.id,
+    email,
+    username,
+    role: username === "Coordenação" ? "coordinator" : "member",
+  };
 }
 
 function applyPlannerPreferencesForUser() {
@@ -219,21 +259,83 @@ function applyUserPermissions() {
   }
 }
 
-function handleLogin(event) {
-  event.preventDefault();
-  const user = appUsers.find((item) => item.username === els.loginUser.value && item.password === els.loginPassword.value);
-  if (!user) {
-    els.loginError.textContent = "Usuário ou senha inválidos.";
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+async function loadRemoteState() {
+  if (!supabaseClient || !currentUser) return;
+  const { data, error } = await supabaseClient.from("app_state").select("data").eq("id", 1).single();
+  if (error) {
+    console.error("Erro ao carregar dados do Supabase:", error);
+    remoteStateReady = true;
     return;
   }
-  currentUser = user;
-  localStorage.setItem(sessionKey, user.username);
-  els.loginPassword.value = "";
+  const remoteState = data?.data;
+  if (remoteState?.projects?.length) {
+    applyRemoteState(remoteState);
+  } else {
+    await saveStateToSupabase(true);
+  }
+  remoteStateReady = true;
+}
+
+function applyRemoteState(remoteState) {
+  Object.keys(state).forEach((key) => delete state[key]);
+  Object.assign(state, remoteState);
+  state.projects = Array.isArray(state.projects) && state.projects.length ? state.projects : loadState().projects;
+  state.plannerItems = Array.isArray(state.plannerItems) ? state.plannerItems : [];
+  state.coordinationItems = Array.isArray(state.coordinationItems) ? state.coordinationItems : [];
+  activeProjectId = state.activeProjectId || state.projects[0].id;
+  if (!state.projects.some((item) => item.id === activeProjectId)) activeProjectId = state.projects[0].id;
+  activeProjectView = state.activeProjectView || "kanban";
+  planningDays = state.planningDays || 75;
+  planningOffsetDays = state.planningOffsetDays ?? -21;
+  activePlanningView = state.activePlanningView || "allocation";
+  activePlannerView = state.activePlannerView || "day";
+  plannerDate = normalizeDateValue(state.plannerDate || new Date());
+}
+
+function scheduleRemoteStateSave() {
+  if (!remoteStateReady || !currentUser) return;
+  window.clearTimeout(remoteSaveTimer);
+  remoteSaveTimer = window.setTimeout(() => saveStateToSupabase(), 600);
+}
+
+async function saveStateToSupabase(force = false) {
+  if (!supabaseClient || !currentUser || (!remoteStateReady && !force)) return;
+  const payload = JSON.parse(JSON.stringify(state));
+  const { error } = await supabaseClient.from("app_state").upsert({
+    id: 1,
+    data: payload,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) console.error("Erro ao salvar dados no Supabase:", error);
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
   els.loginError.textContent = "";
+  const email = els.loginUser.value.trim();
+  const password = els.loginPassword.value;
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error || !data.user) {
+    els.loginError.textContent = "E-mail ou senha inválidos.";
+    return;
+  }
+  currentUser = mapSupabaseUser(data.user);
+  localStorage.setItem(sessionKey, currentUser.username);
+  els.loginPassword.value = "";
+  await loadRemoteState();
   showAuthenticatedApp();
 }
 
-function logout() {
+async function logout() {
+  await supabaseClient?.auth.signOut();
   localStorage.removeItem(sessionKey);
   currentUser = null;
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
@@ -365,6 +467,7 @@ function saveState() {
   state.plannerItems = state.plannerItems || [];
   state.coordinationItems = state.coordinationItems || [];
   localStorage.setItem(storeKey, JSON.stringify(state));
+  scheduleRemoteStateSave();
 }
 
 function project() {
@@ -2136,5 +2239,7 @@ els.deleteTaskBtn.addEventListener("click", () => {
 });
 
 requireLogin();
+
+
 
 
