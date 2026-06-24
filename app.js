@@ -6,11 +6,11 @@ const supabaseClient = window.supabase?.createClient(supabaseUrl, supabaseKey);
 let remoteStateReady = false;
 let remoteSaveTimer = null;
 const appUsers = [
-  { username: "Anna", password: "Anna-8p2-7429", role: "member" },
-  { username: "Felipe", password: "Felipe-8p2-3168", role: "member" },
-  { username: "Gustavo", password: "Gustavo-8p2-9054", role: "member" },
-  { username: "Vanderlania", password: "Vander-8p2-6815", role: "member" },
-  { username: "Coordenação", password: "Coord-8p2-4287", role: "coordinator" },
+  { username: "Anna", email: "anna.caminha@8p2.com", role: "member" },
+  { username: "Felipe", email: "felipe.alves@8p2.com", role: "member" },
+  { username: "Gustavo", email: "gustavo.carvalho@8p2.com", role: "member" },
+  { username: "Vanderlania", email: "vanderlania.brito@8p2.com", role: "member" },
+  { username: "Coordenação", email: "gabriel.garcia2929@gmail.com", role: "coordinator" },
 ];
 const msDay = 24 * 60 * 60 * 1000;
 const planningCellWidth = 32;
@@ -190,6 +190,7 @@ function isCoordinator() {
 }
 
 async function requireLogin() {
+  els.loginUser.innerHTML = appUsers.map((user) => `<option value="${escapeHtml(user.username)}">${escapeHtml(user.username)}</option>`).join("");
   if (!supabaseClient) {
     document.body.classList.add("auth-locked");
     els.loginScreen.classList.remove("hidden-field");
@@ -227,10 +228,16 @@ function mapSupabaseUser(user) {
   const normalized = normalizeText(localPart);
   const knownNames = {
     anna: "Anna",
+    annacaminha: "Anna",
     felipe: "Felipe",
+    felipealves: "Felipe",
     gustavo: "Gustavo",
+    gustavocarvalho: "Gustavo",
     vanderlania: "Vanderlania",
+    vanderlaniabrito: "Vanderlania",
     gabriel: "Gabriel",
+    gabrielgaarcia2929: "Coordenação",
+    gabrielgarcia2929: "Coordenação",
     coordenacao: "Coordenação",
     coord: "Coordenação",
   };
@@ -320,11 +327,19 @@ async function saveStateToSupabase(force = false) {
 async function handleLogin(event) {
   event.preventDefault();
   els.loginError.textContent = "";
-  const email = els.loginUser.value.trim();
+  const selectedUser = appUsers.find((user) => user.username === els.loginUser.value);
+  const email = selectedUser?.email || els.loginUser.value.trim();
   const password = els.loginPassword.value;
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error || !data.user) {
-    els.loginError.textContent = "E-mail ou senha inválidos.";
+    const message = error?.message || "";
+    if (/email not confirmed/i.test(message)) {
+      els.loginError.textContent = "Este usuário ainda não foi confirmado no Supabase.";
+    } else if (/invalid login credentials/i.test(message)) {
+      els.loginError.textContent = "E-mail ou senha inválidos. Confira se o usuário foi criado e confirmado no Supabase.";
+    } else {
+      els.loginError.textContent = message || "Não foi possível entrar. Verifique o usuário no Supabase.";
+    }
     return;
   }
   currentUser = mapSupabaseUser(data.user);
