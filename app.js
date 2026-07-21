@@ -18,7 +18,7 @@ const appUsers = [
   { username: "Felipe", email: "felipe.alves@8p2.com", role: "member" },
   { username: "Gustavo", email: "gustavo.carvalho@8p2.com", role: "member" },
   { username: "Vanderlania", email: "vanderlania.brito@8p2.com", role: "member" },
-  { username: "Ricardo", email: "ricardo@8p2.com", role: "member" },
+  { username: "Ricardo", email: "ricardo.guedes@8p2.de", role: "member" },
   { username: "Coordenação", email: "gabriel.gaarcia2929@gmail.com", role: "coordinator" },
 ];
 const msDay = 24 * 60 * 60 * 1000;
