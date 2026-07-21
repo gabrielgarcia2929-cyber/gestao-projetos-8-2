@@ -73,7 +73,7 @@
           <div>
             <p class="eyebrow" id="pageEyebrow">Carteira de projetos</p>
             <h1 id="projectTitle">Projeto</h1>
-            <p class="developer-credit">Developed by: Gabriel Garcia</p>
+            <p class="developer-credit">Developed by: Gabriel Garcia <span class="app-version">V03</span></p>
           </div>
           <div class="topbar-actions">
             <div class="save-status" id="saveStatus" role="status" aria-live="polite">
@@ -258,6 +258,11 @@
                 <button class="ghost-button" id="plannerTodayBtn" type="button">Hoje</button>
                 <button class="ghost-button" id="plannerNextBtn" type="button">Avancar</button>
                 <input id="plannerDateInput" type="date" />
+                <select id="plannerSourceFilter" class="planner-source-filter" aria-label="Filtrar origem das tarefas">
+                  <option value="all">Total</option>
+                  <option value="manual">Manual</option>
+                  <option value="project">Projeto</option>
+                </select>
               </div>
             </div>
             <div class="project-view-toolbar">

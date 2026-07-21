@@ -263,6 +263,12 @@ h1 {
   font-weight: 800;
 }
 
+.app-version {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--accent);
+}
+
 h2 {
   margin-bottom: 16px;
   font-size: 18px;
@@ -778,6 +784,15 @@ menu {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.planning-actions select {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 10px;
+  font-weight: 800;
 }
 
 .toolbar select {
@@ -1927,6 +1942,29 @@ menu {
   gap: 7px;
   font-size: 13px;
   font-weight: 800;
+}
+
+.legend-item [data-planning-project-label] {
+  cursor: text;
+}
+
+.legend-item input[type="color"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.legend-item input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.legend-item input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 4px;
 }
 
 .legend-item i {

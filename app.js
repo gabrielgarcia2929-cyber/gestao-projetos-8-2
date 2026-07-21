@@ -1,6 +1,7 @@
 ﻿const storeKey = "gestao-projetos-v1";
 const sessionKey = "gestao-projetos-session";
 const backupKey = "gestao-projetos-backups";
+const appVersion = "V03";
 const supabaseUrl = "https://mhqssjntntonsqcfjarf.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ocXNzam50bnRvbnNxY2ZqYXJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDg5NzgsImV4cCI6MjA5Nzg4NDk3OH0.cr4mKTNhCCFjasvodaJQfocrk_kAzye5QFca5A9ihiw";
 const supabaseClient = window.supabase?.createClient(supabaseUrl, supabaseKey);
@@ -69,6 +70,7 @@ let activePlanningView = state.activePlanningView || "allocation";
 let activePlannerView = state.activePlannerView || "day";
 let plannerDate = normalizeDateValue(state.plannerDate || new Date());
 let activePlannerUser = state.activePlannerUser || currentUser?.username || "";
+let activePlannerSourceFilter = state.activePlannerSourceFilter || "all";
 let portfolioStatusFilter = state.portfolioStatusFilter || "all";
 let editingProjectParks = [];
 let editingTaskCheckinGroups = [];
@@ -130,6 +132,7 @@ const els = {
   contractedProjects: document.querySelector("#contractedProjects"),
   plannerBoard: document.querySelector("#plannerBoard"),
   plannerDateInput: document.querySelector("#plannerDateInput"),
+  plannerSourceFilter: document.querySelector("#plannerSourceFilter"),
   plannerUserSelect: document.querySelector("#plannerUserSelect"),
   plannerProjectSelect: document.querySelector("#plannerProjectSelect"),
   plannerTaskSelect: document.querySelector("#plannerTaskSelect"),
@@ -215,7 +218,16 @@ function loadState() {
       },
     ],
   };
-  return { activeProjectId: sampleProject.id, projects: [sampleProject], plannerItems: [], pipelineDrafts: [], changeLog: [], coordinationNotes: "", lastSavedAt: "" };
+  return {
+    activeProjectId: sampleProject.id,
+    projects: [sampleProject],
+    plannerItems: [],
+    pipelineDrafts: [],
+    planningProjectMeta: {},
+    changeLog: [],
+    coordinationNotes: "",
+    lastSavedAt: "",
+  };
 }
 
 function loadSessionUser() {
@@ -294,6 +306,7 @@ function applyPlannerPreferencesForUser() {
   if (!preferences) return;
   activePlannerView = preferences.activePlannerView || activePlannerView;
   plannerDate = normalizeDateValue(preferences.plannerDate || plannerDate);
+  activePlannerSourceFilter = preferences.activePlannerSourceFilter || activePlannerSourceFilter;
   activePlannerUser = isCoordinator() ? state.activePlannerUser || currentUser?.username || "Coordenação" : currentUser?.username || "";
 }
 
@@ -356,6 +369,7 @@ function applyRemoteState(remoteState) {
   state.plannerItems = mergeLegacyPlannerItems(Array.isArray(state.plannerItems) ? state.plannerItems : [], legacyPlannerItems);
   state.coordinationItems = Array.isArray(state.coordinationItems) ? state.coordinationItems : [];
   state.pipelineDrafts = Array.isArray(state.pipelineDrafts) ? state.pipelineDrafts : [];
+  state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
   state.changeLog = Array.isArray(state.changeLog) ? state.changeLog : [];
   state.coordinationNotes = state.coordinationNotes || "";
   state.lastSavedAt = state.lastSavedAt || "";
@@ -366,6 +380,7 @@ function applyRemoteState(remoteState) {
   planningOffsetDays = state.planningOffsetDays ?? -21;
   activePlanningView = state.activePlanningView || "allocation";
   activePlannerView = state.activePlannerView || "day";
+  activePlannerSourceFilter = state.activePlannerSourceFilter || "all";
   activePlannerUser = state.activePlannerUser || currentUser?.username || "";
   portfolioStatusFilter = state.portfolioStatusFilter || "all";
   plannerDate = normalizeDateValue(state.plannerDate || new Date());
@@ -511,6 +526,7 @@ function mergeRemoteStateIntoLocal(remoteState) {
   state.coordinationNotes = state.coordinationNotes || remoteState.coordinationNotes || "";
   state.lastSavedAt = state.lastSavedAt || remoteState.lastSavedAt || "";
   state.plannerPreferences = { ...(remoteState.plannerPreferences || {}), ...(state.plannerPreferences || {}) };
+  state.planningProjectMeta = { ...(remoteState.planningProjectMeta || {}), ...(state.planningProjectMeta || {}) };
 }
 
 async function saveStateToSupabase(force = false) {
@@ -734,11 +750,13 @@ function saveState(markDirty = true) {
   state.planningOffsetDays = planningOffsetDays;
   state.activePlanningView = activePlanningView;
   state.activePlannerUser = activePlannerUser;
+  state.activePlannerSourceFilter = activePlannerSourceFilter;
   state.plannerPreferences = state.plannerPreferences || {};
   if (currentUser) {
     state.plannerPreferences[currentUser.username] = {
       activePlannerView,
       plannerDate,
+      activePlannerSourceFilter,
     };
   } else {
     state.activePlannerView = activePlannerView;
@@ -747,6 +765,7 @@ function saveState(markDirty = true) {
   state.plannerItems = state.plannerItems || [];
   state.coordinationItems = state.coordinationItems || [];
   state.pipelineDrafts = state.pipelineDrafts || [];
+  state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
   state.changeLog = Array.isArray(state.changeLog) ? state.changeLog : [];
   state.coordinationNotes = state.coordinationNotes || "";
   if (markDirty) registerChange();
@@ -863,6 +882,7 @@ function render() {
   state.plannerItems = Array.isArray(state.plannerItems) ? state.plannerItems.map(normalizePlannerItem) : [];
   state.coordinationItems = Array.isArray(state.coordinationItems) ? state.coordinationItems.map(normalizeCoordinationItem) : [];
   state.pipelineDrafts = Array.isArray(state.pipelineDrafts) ? state.pipelineDrafts : [];
+  state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
   state.changeLog = Array.isArray(state.changeLog) ? state.changeLog : [];
   state.coordinationNotes = state.coordinationNotes || "";
   state.lastSavedAt = state.lastSavedAt || "";
@@ -1352,7 +1372,7 @@ function syncTaskPlannerCards(current, task) {
 }
 
 function syncAllProjectTasksToPlanner() {
-  if (state.autoPlannerSyncVersion === 2) return false;
+  if (state.autoPlannerSyncVersion === 3) return false;
   let changed = false;
   state.projects.forEach((projectItem) => {
     normalizeProject(projectItem);
@@ -1360,7 +1380,7 @@ function syncAllProjectTasksToPlanner() {
       if (task.status !== "concluido") changed = syncTaskPlannerCards(projectItem, task) || changed;
     });
   });
-  state.autoPlannerSyncVersion = 2;
+  state.autoPlannerSyncVersion = 3;
   return true || changed;
 }
 
@@ -1419,6 +1439,7 @@ function renderPlanner() {
     button.classList.toggle("active", button.dataset.plannerView === activePlannerView);
   });
   els.plannerDateInput.value = plannerDate;
+  if (els.plannerSourceFilter) els.plannerSourceFilter.value = activePlannerSourceFilter;
   const dates = plannerDates();
   els.plannerBoard.className = `planner-board planner-${activePlannerView}`;
   els.plannerBoard.innerHTML = dates.map(renderPlannerDay).join("");
@@ -1535,6 +1556,11 @@ function plannerDates() {
 function plannerItemsForDate(dateValue) {
   return state.plannerItems
     .filter((item) => item.user === plannerUserName())
+    .filter((item) => {
+      if (activePlannerSourceFilter === "project") return Boolean(item.sourceTaskId);
+      if (activePlannerSourceFilter === "manual") return !item.sourceTaskId;
+      return true;
+    })
     .filter((item) => item.date === dateValue || (item.weekly && item.date <= dateValue && parseDate(item.date).getDay() === parseDate(dateValue).getDay()))
     .sort((a, b) =>
       Number(plannerItemDoneOnDate(a, dateValue)) - Number(plannerItemDoneOnDate(b, dateValue))
@@ -2072,7 +2098,12 @@ function renderPlanning() {
   els.planningGrid.style.gridTemplateColumns = `150px repeat(${days.length}, ${planningCellWidth}px)`;
   els.planningGrid.innerHTML = members.length ? header + rows : empty("Adicione envolvidos aos projetos para montar o planejamento.");
   els.planningLegend.innerHTML = projects
-    .map((item) => `<span class="legend-item"><i style="background:${colors.get(item.id)}"></i>${escapeHtml(projectLegendLabel(item))}</span>`)
+    .map(
+      (item) => `<span class="legend-item">
+        <input type="color" value="${escapeHtml(colors.get(item.id))}" data-planning-project-color="${escapeHtml(item.id)}" title="Alterar cor no Planejamento">
+        <span data-planning-project-label="${escapeHtml(item.id)}" title="Duplo clique para alterar o nome apenas no Planejamento">${escapeHtml(projectLegendLabel(item))}</span>
+      </span>`
+    )
     .join("");
   renderGeneralGantt(projects, colors);
   renderPipeline(projects, colors);
@@ -2118,6 +2149,11 @@ function projectPlanningRange(item) {
 }
 
 function projectLegendLabel(item) {
+  const customLabel = state.planningProjectMeta?.[item.id]?.label;
+  return customLabel || defaultProjectLegendLabel(item);
+}
+
+function defaultProjectLegendLabel(item) {
   return `${item.name || "Sem cliente"} - ${projectTypeLabel(item)}`;
 }
 
@@ -2156,7 +2192,13 @@ function dateInRange(date, start, end) {
 
 function projectColors(projects) {
   const palette = ["#ff8200", "#111111", "#7c2d12", "#facc15", "#6b7280", "#fb7185", "#38bdf8", "#a855f7", "#22c55e", "#ef4444"];
-  return new Map(projects.map((item, index) => [item.id, palette[index % palette.length]]));
+  state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
+  return new Map(
+    projects.map((item, index) => {
+      const storedColor = state.planningProjectMeta[item.id]?.color;
+      return [item.id, /^#[0-9a-f]{6}$/i.test(storedColor || "") ? storedColor : palette[index % palette.length]];
+    })
+  );
 }
 
 function allocationBackground(allocations, colors) {
@@ -2688,6 +2730,38 @@ document.querySelector("#planningNextBtn").addEventListener("click", () => {
   saveState();
 });
 
+els.planningLegend.addEventListener("change", (event) => {
+  const colorInput = event.target.closest("[data-planning-project-color]");
+  if (!colorInput) return;
+  state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
+  const projectId = colorInput.dataset.planningProjectColor;
+  state.planningProjectMeta[projectId] = {
+    ...(state.planningProjectMeta[projectId] || {}),
+    color: colorInput.value,
+  };
+  renderPlanning();
+  saveState();
+});
+
+els.planningLegend.addEventListener("dblclick", (event) => {
+  const editable = event.target.closest("[data-planning-project-label]");
+  if (!editable) return;
+  event.preventDefault();
+  const projectId = editable.dataset.planningProjectLabel;
+  const item = state.projects.find((projectItem) => projectItem.id === projectId);
+  if (!item) return;
+  startInlineTextEdit(editable, projectLegendLabel(item), (nextText) => {
+    state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
+    const cleanText = nextText.trim();
+    state.planningProjectMeta[projectId] = {
+      ...(state.planningProjectMeta[projectId] || {}),
+      label: cleanText && cleanText !== defaultProjectLegendLabel(item) ? cleanText : "",
+    };
+    renderPlanning();
+    saveState();
+  });
+});
+
 document.querySelector("#plannerViewToggle").addEventListener("click", (event) => {
   if (!event.target.dataset.plannerView) return;
   activePlannerView = event.target.dataset.plannerView;
@@ -2704,6 +2778,11 @@ document.querySelector("#plannerTodayBtn").addEventListener("click", () => {
 document.querySelector("#plannerNextBtn").addEventListener("click", () => movePlannerDate(1));
 els.plannerDateInput.addEventListener("change", () => {
   plannerDate = normalizeDateValue(els.plannerDateInput.value || new Date());
+  renderPlanner();
+  saveState();
+});
+els.plannerSourceFilter?.addEventListener("change", () => {
+  activePlannerSourceFilter = els.plannerSourceFilter.value || "all";
   renderPlanner();
   saveState();
 });
