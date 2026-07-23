@@ -1,13 +1,14 @@
 ﻿const storeKey = "gestao-projetos-v1";
 const sessionKey = "gestao-projetos-session";
 const backupKey = "gestao-projetos-backups";
-const appVersion = "V03";
+const appVersion = "V04";
 const supabaseUrl = "https://mhqssjntntonsqcfjarf.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ocXNzam50bnRvbnNxY2ZqYXJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDg5NzgsImV4cCI6MjA5Nzg4NDk3OH0.cr4mKTNhCCFjasvodaJQfocrk_kAzye5QFca5A9ihiw";
 const supabaseClient = window.supabase?.createClient(supabaseUrl, supabaseKey);
 let remoteStateReady = false;
 let legacyPlannerItemsMerged = false;
 let remoteUpdatedAt = "";
+let remoteBaselineState = null;
 let remoteSaveTimer = null;
 let remoteSaveInFlight = false;
 let remoteSaveQueued = false;
@@ -16,14 +17,13 @@ let saveStatusMode = "saved";
 const appUsers = [
   { username: "Anna", email: "anna.caminha@8p2.com", role: "member" },
   { username: "Felipe", email: "felipe.alves@8p2.com", role: "member" },
-  { username: "Gustavo", email: "gustavo.carvalho@8p2.com", role: "member" },
   { username: "Vanderlania", email: "vanderlania.brito@8p2.com", role: "member" },
   { username: "Ricardo", email: "ricardo.guedes@8p2.de", role: "member" },
   { username: "Coordenação", email: "gabriel.gaarcia2929@gmail.com", role: "coordinator" },
 ];
 const msDay = 24 * 60 * 60 * 1000;
 const planningCellWidth = 32;
-const engineeringMembers = ["Anna", "Felipe", "Vanderlania", "Gustavo", "Gabriel", "Ricardo"];
+const engineeringMembers = ["Anna", "Felipe", "Vanderlania", "Gabriel", "Ricardo"];
 
 const statusLabels = {
   aprovado: "Aprovado",
@@ -57,7 +57,7 @@ const projectVariablesByType = {
   LTE: ["Inspeção externa de Blade", "Coleta de lubrificante", "Inspeção eletromecânica", "Outro"],
 };
 
-const coordinationMembers = ["Anna", "Felipe", "Vanderlânia", "Gustavo"];
+const coordinationMembers = ["Anna", "Felipe", "Vanderlânia"];
 
 const state = loadState();
 let currentUser = loadSessionUser();
@@ -222,6 +222,7 @@ function loadState() {
     activeProjectId: sampleProject.id,
     projects: [sampleProject],
     plannerItems: [],
+    hiddenPlannerCards: [],
     pipelineDrafts: [],
     planningProjectMeta: {},
     changeLog: [],
@@ -250,7 +251,12 @@ async function requireLogin() {
   const { data } = await supabaseClient.auth.getSession();
   if (data.session?.user) {
     currentUser = mapSupabaseUser(data.session.user);
-    await loadRemoteState();
+    if (currentUser) {
+      await loadRemoteState();
+    } else {
+      await supabaseClient.auth.signOut();
+      localStorage.removeItem(sessionKey);
+    }
   } else {
     currentUser = null;
     localStorage.removeItem(sessionKey);
@@ -274,6 +280,15 @@ function showAuthenticatedApp() {
 
 function mapSupabaseUser(user) {
   const email = user.email || "";
+  const listedUser = appUsers.find((item) => item.email.toLocaleLowerCase("pt-BR") === email.toLocaleLowerCase("pt-BR"));
+  if (listedUser) {
+    return {
+      id: user.id,
+      email,
+      username: listedUser.username,
+      role: listedUser.role,
+    };
+  }
   const localPart = email.split("@")[0] || "";
   const normalized = normalizeText(localPart);
   const knownNames = {
@@ -281,8 +296,6 @@ function mapSupabaseUser(user) {
     annacaminha: "Anna",
     felipe: "Felipe",
     felipealves: "Felipe",
-    gustavo: "Gustavo",
-    gustavocarvalho: "Gustavo",
     vanderlania: "Vanderlania",
     vanderlaniabrito: "Vanderlania",
     ricardo: "Ricardo",
@@ -293,6 +306,7 @@ function mapSupabaseUser(user) {
     coord: "Coordenação",
   };
   const username = knownNames[normalized] || user.user_metadata?.name || localPart || email || "Usuário";
+  if (!appUsers.some((item) => item.username === username)) return null;
   return {
     id: user.id,
     email,
@@ -338,6 +352,7 @@ async function loadRemoteState() {
       await saveStateToSupabase(true);
       remoteStateReady = true;
       hasUnsavedChanges = false;
+      rememberRemoteBaseline();
       setSaveStatus("saved", "Tudo salvo");
       return;
     }
@@ -351,6 +366,7 @@ async function loadRemoteState() {
   if (remoteState?.projects?.length) {
     applyRemoteState(remoteState);
     state.lastSavedAt = state.lastSavedAt || remoteUpdatedAt;
+    rememberRemoteBaseline();
     if (legacyPlannerItemsMerged) await saveStateToSupabase(true);
   } else {
     await saveStateToSupabase(true);
@@ -367,6 +383,7 @@ function applyRemoteState(remoteState) {
   state.projects = Array.isArray(state.projects) && state.projects.length ? state.projects : loadState().projects;
   state.projects.forEach(normalizeProject);
   state.plannerItems = mergeLegacyPlannerItems(Array.isArray(state.plannerItems) ? state.plannerItems : [], legacyPlannerItems);
+  state.hiddenPlannerCards = Array.isArray(state.hiddenPlannerCards) ? state.hiddenPlannerCards : [];
   state.coordinationItems = Array.isArray(state.coordinationItems) ? state.coordinationItems : [];
   state.pipelineDrafts = Array.isArray(state.pipelineDrafts) ? state.pipelineDrafts : [];
   state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
@@ -384,6 +401,25 @@ function applyRemoteState(remoteState) {
   activePlannerUser = state.activePlannerUser || currentUser?.username || "";
   portfolioStatusFilter = state.portfolioStatusFilter || "all";
   plannerDate = normalizeDateValue(state.plannerDate || new Date());
+}
+
+function rememberRemoteBaseline() {
+  remoteBaselineState = cloneStateSnapshot(state);
+}
+
+function cloneStateSnapshot(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function sameSnapshot(a, b) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+function withoutKeys(item, keys = []) {
+  if (!item) return item;
+  const copy = { ...item };
+  keys.forEach((key) => delete copy[key]);
+  return copy;
 }
 
 function mergeLegacyPlannerItems(remoteItems, legacyItems) {
@@ -474,54 +510,81 @@ function mergeById(remoteItems = [], localItems = []) {
   return [...merged.values()];
 }
 
-function mergeTasks(remoteTasks = [], localTasks = []) {
+function mergeByIdWithBaseline(remoteItems = [], localItems = [], baselineItems = [], options = {}) {
+  const remoteById = new Map(remoteItems.filter(Boolean).map((item) => [item.id, item]));
+  const localById = new Map(localItems.filter(Boolean).map((item) => [item.id, item]));
+  const baselineById = new Map(baselineItems.filter(Boolean).map((item) => [item.id, item]));
+  const ids = new Set([...remoteById.keys(), ...localById.keys(), ...baselineById.keys()]);
+  const nestedKeys = options.nestedKeys || [];
+
+  return [...ids].flatMap((id) => {
+    const remoteItem = remoteById.get(id);
+    const localItem = localById.get(id);
+    const baselineItem = baselineById.get(id);
+    if (!localItem && baselineItem) return [];
+    if (!localItem) return remoteItem ? [remoteItem] : [];
+    if (!remoteItem) return [localItem];
+    if (!baselineItem) return [localItem];
+
+    const localTopChanged = !sameSnapshot(withoutKeys(localItem, nestedKeys), withoutKeys(baselineItem, nestedKeys));
+    const remoteTopChanged = !sameSnapshot(withoutKeys(remoteItem, nestedKeys), withoutKeys(baselineItem, nestedKeys));
+    const selected = localTopChanged || !remoteTopChanged ? localItem : remoteItem;
+    const mergedItem = { ...selected };
+    if (options.mergeNested) options.mergeNested(mergedItem, remoteItem, localItem, baselineItem);
+    return [mergedItem];
+  });
+}
+
+function mergeTasks(remoteTasks = [], localTasks = [], baselineTasks = []) {
   const remoteById = new Map(remoteTasks.map((task) => [task.id, task]));
-  return mergeById(remoteTasks, localTasks).map((task) => {
+  return mergeByIdWithBaseline(remoteTasks, localTasks, baselineTasks, {
+    nestedKeys: ["checkins", "checkinGroups", "completedPlannerItems"],
+    mergeNested(mergedTask, remoteTask, localTask, baselineTask) {
+      mergedTask.checkins = mergeByIdWithBaseline(remoteTask.checkins || [], localTask.checkins || [], baselineTask.checkins || []);
+      mergedTask.checkinGroups = mergeCheckinGroups(remoteTask.checkinGroups || [], localTask.checkinGroups || [], baselineTask.checkinGroups || []);
+      mergedTask.completedPlannerItems = mergeByIdWithBaseline(
+        remoteTask.completedPlannerItems || [],
+        localTask.completedPlannerItems || [],
+        baselineTask.completedPlannerItems || []
+      );
+    },
+  }).map((task) => {
     const remoteTask = remoteById.get(task.id);
-    if (!remoteTask) return task;
-    return {
-      ...remoteTask,
-      ...task,
-      checkins: mergeById(remoteTask.checkins || [], task.checkins || []),
-      checkinGroups: mergeCheckinGroups(remoteTask.checkinGroups || [], task.checkinGroups || []),
-      completedPlannerItems: mergeById(remoteTask.completedPlannerItems || [], task.completedPlannerItems || []),
-    };
+    return remoteTask ? { ...remoteTask, ...task } : task;
   });
 }
 
-function mergeCheckinGroups(remoteGroups = [], localGroups = []) {
-  const remoteById = new Map(remoteGroups.map((group) => [group.id, group]));
-  return mergeById(remoteGroups, localGroups).map((group) => {
-    const remoteGroup = remoteById.get(group.id);
-    if (!remoteGroup) return group;
-    return {
-      ...remoteGroup,
-      ...group,
-      items: mergeById(remoteGroup.items || [], group.items || []),
-    };
+function mergeCheckinGroups(remoteGroups = [], localGroups = [], baselineGroups = []) {
+  return mergeByIdWithBaseline(remoteGroups, localGroups, baselineGroups, {
+    nestedKeys: ["items"],
+    mergeNested(mergedGroup, remoteGroup, localGroup, baselineGroup) {
+      mergedGroup.items = mergeByIdWithBaseline(remoteGroup.items || [], localGroup.items || [], baselineGroup.items || []);
+    },
   });
 }
 
-function mergeProjects(remoteProjects = [], localProjects = []) {
-  const remoteById = new Map(remoteProjects.map((projectItem) => [projectItem.id, projectItem]));
-  return mergeById(remoteProjects, localProjects).map((projectItem) => {
-    const remoteProject = remoteById.get(projectItem.id);
-    if (!remoteProject) return projectItem;
-    return {
-      ...remoteProject,
-      ...projectItem,
-      tasks: mergeTasks(remoteProject.tasks || [], projectItem.tasks || []),
-      completedPlannerItems: mergeById(remoteProject.completedPlannerItems || [], projectItem.completedPlannerItems || []),
-    };
+function mergeProjects(remoteProjects = [], localProjects = [], baselineProjects = []) {
+  return mergeByIdWithBaseline(remoteProjects, localProjects, baselineProjects, {
+    nestedKeys: ["tasks", "completedPlannerItems"],
+    mergeNested(mergedProject, remoteProject, localProject, baselineProject) {
+      mergedProject.tasks = mergeTasks(remoteProject.tasks || [], localProject.tasks || [], baselineProject.tasks || []);
+      mergedProject.completedPlannerItems = mergeByIdWithBaseline(
+        remoteProject.completedPlannerItems || [],
+        localProject.completedPlannerItems || [],
+        baselineProject.completedPlannerItems || []
+      );
+    },
   });
 }
 
 function mergeRemoteStateIntoLocal(remoteState) {
   if (!remoteState?.projects?.length) return;
-  state.projects = mergeProjects(remoteState.projects || [], state.projects || []);
-  state.plannerItems = mergeById(remoteState.plannerItems || [], state.plannerItems || []);
-  state.coordinationItems = mergeById(remoteState.coordinationItems || [], state.coordinationItems || []);
-  state.pipelineDrafts = mergeById(remoteState.pipelineDrafts || [], state.pipelineDrafts || []);
+  const baseline = remoteBaselineState || {};
+  state.projects = mergeProjects(remoteState.projects || [], state.projects || [], baseline.projects || []);
+  state.plannerItems = mergeByIdWithBaseline(remoteState.plannerItems || [], state.plannerItems || [], baseline.plannerItems || []);
+  state.hiddenPlannerCards = Array.from(new Set([...(remoteState.hiddenPlannerCards || []), ...(state.hiddenPlannerCards || [])]));
+  state.coordinationItems = mergeByIdWithBaseline(remoteState.coordinationItems || [], state.coordinationItems || [], baseline.coordinationItems || []);
+  state.pipelineDrafts = mergeByIdWithBaseline(remoteState.pipelineDrafts || [], state.pipelineDrafts || [], baseline.pipelineDrafts || []);
   state.changeLog = mergeById(remoteState.changeLog || [], state.changeLog || []).sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 120);
   state.coordinationNotes = state.coordinationNotes || remoteState.coordinationNotes || "";
   state.lastSavedAt = state.lastSavedAt || remoteState.lastSavedAt || "";
@@ -568,6 +631,7 @@ async function saveStateToSupabase(force = false) {
   }
   remoteUpdatedAt = nextUpdatedAt;
   localStorage.setItem(storeKey, JSON.stringify(state));
+  rememberRemoteBaseline();
   hasUnsavedChanges = false;
   setSaveStatus("saved", "Tudo salvo");
   remoteSaveInFlight = false;
@@ -763,6 +827,7 @@ function saveState(markDirty = true) {
     state.plannerDate = plannerDate;
   }
   state.plannerItems = state.plannerItems || [];
+  state.hiddenPlannerCards = Array.isArray(state.hiddenPlannerCards) ? state.hiddenPlannerCards : [];
   state.coordinationItems = state.coordinationItems || [];
   state.pipelineDrafts = state.pipelineDrafts || [];
   state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
@@ -880,6 +945,7 @@ function formatShortDate(date) {
 function render() {
   if (!currentUser) return;
   state.plannerItems = Array.isArray(state.plannerItems) ? state.plannerItems.map(normalizePlannerItem) : [];
+  state.hiddenPlannerCards = Array.isArray(state.hiddenPlannerCards) ? state.hiddenPlannerCards : [];
   state.coordinationItems = Array.isArray(state.coordinationItems) ? state.coordinationItems.map(normalizeCoordinationItem) : [];
   state.pipelineDrafts = Array.isArray(state.pipelineDrafts) ? state.pipelineDrafts : [];
   state.planningProjectMeta = state.planningProjectMeta && typeof state.planningProjectMeta === "object" ? state.planningProjectMeta : {};
@@ -1310,6 +1376,22 @@ function taskPlannerOwner(task) {
   return engineeringMembers.find((name) => samePerson(name, task.owner)) || "";
 }
 
+function plannerCardKey(projectId, taskId, dateValue, user) {
+  return [projectId || "", taskId || "", dateValue || "", normalizePersonName(user || "")].join("|");
+}
+
+function hidePlannerCard(item) {
+  if (!item?.sourceProjectId || !item?.sourceTaskId) return;
+  state.hiddenPlannerCards = Array.isArray(state.hiddenPlannerCards) ? state.hiddenPlannerCards : [];
+  const key = plannerCardKey(item.sourceProjectId, item.sourceTaskId, item.autoTaskDate || item.date, item.user);
+  if (!state.hiddenPlannerCards.includes(key)) state.hiddenPlannerCards.push(key);
+}
+
+function unhidePlannerCardsForTask(projectId, taskId) {
+  state.hiddenPlannerCards = Array.isArray(state.hiddenPlannerCards) ? state.hiddenPlannerCards : [];
+  state.hiddenPlannerCards = state.hiddenPlannerCards.filter((key) => !key.startsWith(`${projectId}|${taskId}|`));
+}
+
 function syncTaskPlannerCards(current, task) {
   normalizeProject(current);
   normalizeTask(task);
@@ -1328,6 +1410,7 @@ function syncTaskPlannerCards(current, task) {
   });
 
   businessDates.forEach((dateValue) => {
+    if ((state.hiddenPlannerCards || []).includes(plannerCardKey(current.id, task.id, dateValue, owner))) return;
     const existing = state.plannerItems.find((item) =>
       item.sourceProjectId === current.id
       && item.sourceTaskId === task.id
@@ -1349,6 +1432,8 @@ function syncTaskPlannerCards(current, task) {
       order: rank + 1,
     };
     if (existing) {
+      const changedOwnerOrDate = existing.user !== nextData.user || existing.autoTaskDate !== nextData.autoTaskDate || existing.date !== nextData.date;
+      if (changedOwnerOrDate) unhidePlannerCardsForTask(current.id, task.id);
       Object.keys(nextData).forEach((key) => {
         if (existing[key] !== nextData[key]) {
           existing[key] = nextData[key];
@@ -2849,6 +2934,8 @@ els.plannerBoard.addEventListener("click", (event) => {
   }
   const deleteButton = event.target.closest("[data-planner-delete]");
   if (deleteButton) {
+    const item = state.plannerItems.find((entry) => entry.id === deleteButton.dataset.plannerDelete);
+    if (item) hidePlannerCard(item);
     state.plannerItems = state.plannerItems.filter((entry) => entry.id !== deleteButton.dataset.plannerDelete);
     renderPlanner();
     saveState();
