@@ -449,7 +449,7 @@ function setSaveStatus(mode, text) {
   els.saveStatus.classList.add(mode);
   const savedAt = state.lastSavedAt ? ` às ${formatTime(state.lastSavedAt)}` : "";
   els.saveStatusText.textContent = mode === "saved" ? `${text} em ${currentAreaLabel()}${savedAt}` : text;
-  els.saveChangesBtn.disabled = mode === "saving" || !hasUnsavedChanges;
+  els.saveChangesBtn.disabled = mode === "saving";
 }
 
 function formatTime(value) {
@@ -600,7 +600,7 @@ async function saveStateToSupabase(force = false) {
   }
   remoteSaveInFlight = true;
   setSaveStatus("saving", "Salvando...");
-  if (!force && remoteUpdatedAt) {
+  if (remoteUpdatedAt) {
     const { data: latest, error: latestError } = await supabaseClient.from("app_state").select("data, updated_at").eq("id", 1).single();
     if (latestError) {
       console.error("Erro ao conferir versão no Supabase:", latestError);
@@ -2644,7 +2644,10 @@ document.querySelectorAll("[data-close]").forEach((button) => {
 
 els.loginForm.addEventListener("submit", handleLogin);
 els.logoutBtn.addEventListener("click", logout);
-els.saveChangesBtn.addEventListener("click", () => saveStateToSupabase());
+els.saveChangesBtn.addEventListener("click", async () => {
+  saveState(false);
+  await saveStateToSupabase(true);
+});
 if (els.portfolioStatusFilter) {
   els.portfolioStatusFilter.addEventListener("change", () => {
     portfolioStatusFilter = els.portfolioStatusFilter.value;
